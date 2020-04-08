@@ -6,6 +6,22 @@
 #include <unistd.h>
 #include <pthread.h>
 
+int getConnectionInfo(const char* node, struct addrinfo *result) {
+  const char *service = "80";
+
+  struct addrinfo hints;
+  memset(&hints, 0, sizeof(struct addrinfo));
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_flags = 0;
+  hints.ai_protocol = 0;
+  hints.ai_canonname = NULL;
+  hints.ai_addr = NULL;
+  hints.ai_next = NULL;
+
+  return getaddrinfo(node, service, &hints, &result);
+}
+
 int createConnection(struct addrinfo *result) {
   int sfd = -1;
   struct addrinfo *rp;
@@ -24,7 +40,6 @@ int createConnection(struct addrinfo *result) {
   }
 
   if(rp == NULL) {
-    printf("error connecting\n");
     return -1;
   }
 
@@ -34,49 +49,37 @@ int createConnection(struct addrinfo *result) {
 int sendData(const char *node, int sfd) {
   char send_data[1024];
   snprintf(send_data, sizeof(send_data), "HEAD /%s HTTP/1.1\r\nHost: %s\r\n\r\n", "input/testInput.csv", node);
-  printf("%s\n", send_data);
+  printf("sending data\n")
   if(send(sfd, send_data, strlen(send_data), 0) == -1) {
-    printf("error sending");
     return -1;
   }
 
   return 0;
 }
 
-void* go(void *vargp) {
+u_long getContentSize() {
   time_t now;
   time(&now);
-  int *threadId = (int *) vargp;
-  printf("Thread %d Start: %s\n", *threadId, ctime(&now));
+  printf("Start getting content size: %s\n", ctime(&now));
 
   const char *node = "logsquaredn.s3.amazonaws.com";
-  const char *service = "80";
-
-  struct addrinfo hints;
-  memset(&hints, 0, sizeof(struct addrinfo));
-  hints.ai_family = AF_UNSPEC;
-  hints.ai_socktype = SOCK_STREAM;
-  hints.ai_flags = 0;
-  hints.ai_protocol = 0;
-  hints.ai_canonname = NULL;
-  hints.ai_addr = NULL;
-  hints.ai_next = NULL;
-
   struct addrinfo *result;
-  int s = getaddrinfo(node, service, &hints, &result);
-  if(s != 0) {
-    printf("getaddrinfo failed: %s\n", gai_strerror(s));
-    return NULL;
+  int status = getConnectionInfo(node, result);
+  if(status != 0) {
+    printf("error getting connection info\n");
+    return -1;
   }
 
   int sfd = createConnection(result);
   freeaddrinfo(result);
-  if(sfd == -1) {
-    return NULL;
+  if(sfd < 0) {
+    printf("error creating connection\n");
+    return -1;
   }
 
   if(sendData(node, sfd) == -1) {
-    return NULL;
+    printf("error sending data\n");
+    return -1;
   }
 
   size_t bytes_receieved;
@@ -96,17 +99,21 @@ void* go(void *vargp) {
   close(sfd);
 
   time(&now);
-  printf("Thread %d End: %s\n", *threadId, ctime(&now));
+  printf("Finished getting content size: %s\n", ctime(&now));
 
   return NULL;
 }
 
+// void* go(void *vargp) {
+//   int *threadId = (int *) vargp;
+// }
+
 int main(int argc, const char *argv[]) {
-  pthread_t threadId1;
-  pthread_create(&threadId1, NULL, go, (void *) &threadId1);
-  //pthread_t threadId2;
+  // pthread_t threadId1;
+  // pthread_create(&threadId1, NULL, go, (void *) &threadId1);
+  // //pthread_t threadId2;
   //pthread_create(&threadId2, NULL, go, (void *) &threadId2);
 
-  pthread_exit(NULL);
+  //pthread_exit(NULL);
   return 0;
 }
