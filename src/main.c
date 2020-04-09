@@ -1,12 +1,14 @@
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/sysinfo.h>
 #include <netdb.h>
 #include <string.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <stdlib.h>
 
-int getConnectionInfo(const char* node, struct addrinfo *result) {
+int getConnectionInfo(const char *node, struct addrinfo **result) {
   const char *service = "80";
 
   struct addrinfo hints;
@@ -19,7 +21,7 @@ int getConnectionInfo(const char* node, struct addrinfo *result) {
   hints.ai_addr = NULL;
   hints.ai_next = NULL;
 
-  return getaddrinfo(node, service, &hints, &result);
+  return getaddrinfo(node, service, &hints, result);
 }
 
 int createConnection(struct addrinfo *result) {
@@ -31,7 +33,6 @@ int createConnection(struct addrinfo *result) {
     if(sfd == -1) {
       continue;
     }
-  
 
     if(connect(sfd, rp->ai_addr, rp->ai_addrlen) != -1) {
       printf("connected successfully\n");
@@ -47,25 +48,54 @@ int createConnection(struct addrinfo *result) {
 }
 
 int sendData(const char *node, int sfd) {
-  char send_data[1024];
-  snprintf(send_data, sizeof(send_data), "HEAD /%s HTTP/1.1\r\nHost: %s\r\n\r\n", "input/testInput.csv", node);
-  printf("sending data\n")
-  if(send(sfd, send_data, strlen(send_data), 0) == -1) {
+  char sendData[1024];
+  snprintf(sendData, sizeof(sendData), "HEAD /%s HTTP/1.1\r\nHost: %s\r\n\r\n", "input/testInput.csv", node);
+  printf("sending data\n");
+  if(send(sfd, sendData, strlen(sendData), 0) == -1) {
     return -1;
   }
 
   return 0;
 }
 
-u_long getContentSize() {
+int receiveData(int sfd, char recvData[]) {
+  size_t bytes_receieved;
+  while((bytes_receieved = recv(sfd, recvData, 1024, 0)) > 0) {
+    if(bytes_receieved == -1) {
+      return -1;
+    }
+
+    if(bytes_receieved < 1024) break;
+  }
+  
+  return 0;
+}
+
+long parseContentLength(const char* recvData) {
+  char* strToFind = "Content-Length: ";
+  char* result = strstr(recvData, strToFind);
+  result += strlen(strToFind);
+  
+  char numbers[strlen(result)];
+  int index = 0;
+  while(*result != '\r') {
+    numbers[index] = *result;
+
+    ++index;
+    ++result;
+  }
+
+  return atol(numbers);
+ }
+
+long getContentLength() {
   time_t now;
   time(&now);
-  printf("Start getting content size: %s\n", ctime(&now));
+  printf("Start getting content length: %s\n", ctime(&now));
 
   const char *node = "logsquaredn.s3.amazonaws.com";
   struct addrinfo *result;
-  int status = getConnectionInfo(node, result);
-  if(status != 0) {
+  if(getConnectionInfo(node, &result) < 0) {
     printf("error getting connection info\n");
     return -1;
   }
@@ -82,38 +112,39 @@ u_long getContentSize() {
     return -1;
   }
 
-  size_t bytes_receieved;
-  char recv_data[1024];
-  while((bytes_receieved = recv(sfd, recv_data, 1024, 0)) > 0) {
-    if(bytes_receieved == -1) {
-      printf("error reading");
-      return NULL;
-    }
-
-    printf("bytes received: %zu\n", bytes_receieved);
-    printf("data received: %s\n", recv_data);
-
-    if(bytes_receieved < 1024) break;
+  char recvData[1024];
+  if(receiveData(sfd, recvData) < 0) {
+    printf("error receiving data");
+    return -1;
   }
+  long contentLength = parseContentLength(recvData);
+  printf("content length: %d\n", parseContentLength(recvData));
 
   close(sfd);
 
   time(&now);
-  printf("Finished getting content size: %s\n", ctime(&now));
+  printf("Finished getting content length: %s\n", ctime(&now));
 
-  return NULL;
+  return contentLength;
 }
 
-// void* go(void *vargp) {
-//   int *threadId = (int *) vargp;
-// }
+void* go(void* var1) {
+  int* threadId = (int*) var1;
+  printf("threadId: %d\n", threadId);
+}
 
 int main(int argc, const char *argv[]) {
-  // pthread_t threadId1;
-  // pthread_create(&threadId1, NULL, go, (void *) &threadId1);
-  // //pthread_t threadId2;
-  //pthread_create(&threadId2, NULL, go, (void *) &threadId2);
+  long contentLength = getContentLength();
 
-  //pthread_exit(NULL);
+  int nProcs = get_nprocs();
+  printf("number of processors: %d\n", nProcs);
+  int chunkSize = contentLength / nProcs;
+  for(int i = 0; i < nProcs; ++i) {
+    pthread_t thread;
+    pthread_create(&thread, NULL, go, (void *) &thread);
+  }
+
+  pthread_exit(NULL);
+
   return 0;
 }
